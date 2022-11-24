@@ -20,6 +20,7 @@ function home(c::Connection)
         set_children!(cm, messagebox, MESSAGES)
         rpc!(c, cm)
     end
+    messagebox[:children] = MESSAGES
     maincontainer = div("maincontainer")
     push!(maincontainer, messagebox, chatbox)
     bod = body("mainbody")
