@@ -15,25 +15,24 @@ The home function is served as a route inside of your server by default. To
 function home(c::Connection)
     write!(c, ToolipsDefaults.sheet("styles"))
     chatbox = ToolipsDefaults.textdiv("jl_chatbox", text = "type a message")
-    mamastext = h("mamastext", 2, text = " I love you mama <3")
-    style!(mamastext, "transition" => 3seconds, "transform" => "translateY(100%)",
-    "opacity" => 0percent)
     messagebox = div("messagebox")
     bind!(c, "Enter") do cm::ComponentModifier
         txt::String = cm[chatbox]["text"]
         push!(MESSAGES, a("text$(length(MESSAGES) + 1)", text = txt), br())
+        set_children!(cm, messagebox, MESSAGES)
+        rpc!(c, cm)
         set_text!(cm, chatbox, "")
-        println(txt)
-        if txt  == "love you mama"
-            style!(cm, mamastext, "transform" => "translateY(0%)", "opacity" => "100%")
-            rpc!(c, cm)
-        end
+        println(cm.changes)
+    end
+    on(c, chatbox, "dblclick") do cm::ComponentModifier
+        style!(cm, chatbox, "background-color" => "lightblue")
+        rpc!(c, cm)
     end
     messagebox[:children] = MESSAGES
     maincontainer = div("maincontainer")
     push!(maincontainer, messagebox, chatbox)
     bod = body("mainbody")
-    push!(bod, maincontainer, mamastext)
+    push!(bod, maincontainer)
     write!(c, bod)
     if length(keys(c[:Session].peers)) < 1
         open_rpc!(c, "main")
@@ -43,10 +42,6 @@ function home(c::Connection)
         join_rpc!(c, "main")
         push!(MESSAGES,
         a("text$(length(MESSAGES) + 1)", text = "joined"), br())
-    end
-    script!(c, "chatupdater") do cm::ComponentModifier
-        set_children!(cm, messagebox, MESSAGES)
-        rpc!(c, cm)
     end
 end
 
