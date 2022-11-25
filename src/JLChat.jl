@@ -2,8 +2,10 @@ module JLChat
 using Toolips
 using ToolipsSession
 using ToolipsDefaults
+using ToolipsSVG: circle
 
 MESSAGES = Vector{Servable}()
+PEOPLE = Dict{String, Pair{String, String}}()
 
 ``
 """
@@ -16,32 +18,81 @@ function home(c::Connection)
     write!(c, ToolipsDefaults.sheet("styles"))
     chatbox = ToolipsDefaults.textdiv("jl_chatbox", text = "type a message")
     messagebox = div("messagebox")
+    headerbox = div("headerbox")
+    newsvg = svg("jlballs", align = "center", width = 100percent, height = 10percent)
+    red_circ = circle("red-circ", cx = 0, cy = 10, r = 10)
+    blue_circ = circle("blue-circ", cx = 0, cy = 10, r = 10)
+    green_circ = circle("green-circ", cx = 0, cy = 10, r = 10)
+    style!(red_circ, "fill" => "#D5635C", "transition" => "1.6s", "opacity" => 0percent)
+    style!(blue_circ, "fill" => "#AA79C1", "transition" => "1.3s", "opacity" => 0percent)
+    style!(green_circ, "fill" => "#60AD51", "transition" => "1s", "opacity" => 0percent)
+    push!(newsvg, red_circ, blue_circ, green_circ)
+    jlchatheader = h("jlchatheader", 1, text = "jlchat", align = "center")
+    style!(jlchatheader, "opacity" => 0percent, "transition" => "2s")
+    push!(headerbox, jlchatheader, newsvg)
+    namedialog = ToolipsDefaults.dialog(c, "namedialog", label = "name yourself")
+    namebox = ToolipsDefaults.textdiv("namebox", text = "")
+    style!(namedialog, "opacity" => "0%", "transition" => 2seconds)
+    namelabel = h("namelabel", 2, text = "please enter a name:")
+    push!(namedialog, namelabel, namebox)
     bind!(c, "Enter") do cm::ComponentModifier
         txt::String = cm[chatbox]["text"]
-        push!(MESSAGES, a("text$(length(MESSAGES) + 1)", text = txt), br())
+        userinfo = PEOPLE[getip(c)]
+        message = a("text$(length(MESSAGES) + 1)", text = txt)
+        style!(message, "color" => userinfo[2])
+        push!(MESSAGES, a("text$(length(MESSAGES) + 1)",
+         text = "$(userinfo[1]) : "), message, br())
         set_children!(cm, messagebox, MESSAGES)
         rpc!(c, cm)
-        set_text!(cm, chatbox, "")
-        println(cm.changes)
+        cm[chatbox] = "text" => ""
     end
-    on(c, chatbox, "dblclick") do cm::ComponentModifier
-        style!(cm, chatbox, "background-color" => "lightblue")
-        rpc!(c, cm)
+    on(c, "load") do cm::ComponentModifier
+        style!(cm, namedialog, "opacity" => "100%", "margin-top" => 2percent)
+        cm[red_circ] = "cx" => "45%"
+        cm[blue_circ] = "cx" => "50%"
+        cm[green_circ] = "cx" => "55%"
+        style!(cm, red_circ, "opacity" => 100percent)
+        style!(cm, green_circ, "opacity" => 100percent)
+        style!(cm, blue_circ, "opacity" => 100percent)
+        style!(cm, jlchatheader, "opacity" => 100percent)
     end
+    colorchooser = ToolipsDefaults.colorinput("colorchooser")
+    colorchooser[:text] = "choose your color!"
+    style!(colorchooser, "background-color" => "white", "margin" => 10px)
+    push!(namedialog, colorchooser, br())
     messagebox[:children] = MESSAGES
     maincontainer = div("maincontainer")
+    style!(messagebox, "border-color" => "lightgray", "border-style" => "solid",
+    "overflow-y" => "scroll", "height" => "50%", "margin" => 10px)
+    style!(chatbox, "border-bottom" => "1px solid")
+    style!(namebox, "border-width" => 2px, "border-color" => "lightblue",
+    "border-style" => "solid")
+    style!(namedialog, "border" => "2px solid", "border-radius" => 5px)
     push!(maincontainer, messagebox, chatbox)
     bod = body("mainbody")
-    push!(bod, maincontainer)
+    login_button = button("loginbutton", text = "chat !")
+    on(c, login_button, "click") do cm::ComponentModifier
+        uname = cm[namebox]["text"]
+        color = cm[colorchooser]["value"]
+        push!(PEOPLE, getip(c) => uname => color)
+        message = a("text$(length(MESSAGES) + 1)",
+       text = "$uname joined")
+       style!(message, "color" => color)
+        push!(MESSAGES, message, br())
+        try
+            set_children!(cm, messagecontainer, MESSAGES)
+            rpc!(c, cm)
+        catch
+        end
+        set_children!(cm, bod, [ToolipsDefaults.sheet("styles"), maincontainer])
+    end
+    push!(namedialog, login_button)
+    push!(bod, headerbox, namedialog)
     write!(c, bod)
     if length(keys(c[:Session].peers)) < 1
         open_rpc!(c, "main")
-        push!(MESSAGES,
-        a("text$(length(MESSAGES) + 1)", text = "joined"), br())
     else
         join_rpc!(c, "main")
-        push!(MESSAGES,
-        a("text$(length(MESSAGES) + 1)", text = "joined"), br())
     end
 end
 
@@ -51,6 +102,7 @@ end
 
 routes = [route("/", home), fourofour]
 extensions = Vector{ServerExtension}([Logger(), Files(), Session()])
+
 """
 start(IP::String, PORT::Integer, ) -> ::ToolipsServer
 --------------------
