@@ -35,7 +35,8 @@ function home(c::Connection)
     style!(namedialog, "opacity" => "0%", "transition" => 2seconds)
     namelabel = h("namelabel", 2, text = "please enter a name:")
     push!(namedialog, namelabel, namebox)
-    bind!(c, "Enter") do cm::ComponentModifier
+
+    bind!(c, chatbox, "Enter", :shift) do cm::ComponentModifier
         txt::String = cm[chatbox]["text"]
         userinfo = PEOPLE[getip(c)]
         message = a("text$(length(MESSAGES) + 1)", text = txt)
@@ -44,7 +45,7 @@ function home(c::Connection)
          text = "$(userinfo[1]) : "), message, br())
         set_children!(cm, messagebox, MESSAGES)
         rpc!(c, cm)
-        cm[chatbox] = "text" => ""
+        set_text!(cm, chatbox, " ")
     end
     on(c, "load") do cm::ComponentModifier
         style!(cm, namedialog, "opacity" => "100%", "margin-top" => 2percent)
@@ -76,15 +77,31 @@ function home(c::Connection)
         color = cm[colorchooser]["value"]
         push!(PEOPLE, getip(c) => uname => color)
         message = a("text$(length(MESSAGES) + 1)",
-       text = "$uname joined")
+       text = "$uname ")
+       message2 = a("joined2$(length(MESSAGES) + 1)", text = "joined")
+       style!(message2, "color" => "blue")
        style!(message, "color" => color)
-        push!(MESSAGES, message, br())
+        push!(MESSAGES, message, message2, br())
         try
             set_children!(cm, messagecontainer, MESSAGES)
             rpc!(c, cm)
         catch
         end
         set_children!(cm, bod, [ToolipsDefaults.sheet("styles"), maincontainer])
+        bind!(c, cm, chatbox, "Enter", :shift) do cm2::ComponentModifier
+            txt::String = cm2[chatbox]["text"]
+            userinfo = PEOPLE[getip(c)]
+            message = a("text$(length(MESSAGES) + 1)", text = txt)
+            if length(MESSAGES) > 30
+                deleteat!(MESSAGES, 1:3)
+            end
+            style!(message, "color" => userinfo[2])
+            push!(MESSAGES, a("text$(length(MESSAGES) + 1)",
+             text = "$(userinfo[1]) : "), message, br())
+            set_children!(cm2, messagebox, MESSAGES)
+            rpc!(c, cm2)
+            set_text!(cm2, chatbox, " ")
+        end
     end
     push!(namedialog, login_button)
     push!(bod, headerbox, namedialog)
