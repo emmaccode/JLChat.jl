@@ -11,6 +11,14 @@ mutable struct Chat <: Components.Servable
     host::String
     members::Vector{String}
     messages::Vector{Pair{String, String}}
+    Chat(c::Connection, name::String) = begin
+        ip = get_ip(c)
+        members = [ip]
+        new(name, ip, members, Vector{Pair{String, String}}())
+    end
+    Chat(name::String, host::String) = begin
+        new(name, host, Vector{String}(), messages::Vector{Pair{String, String}})
+    end
 end
 
 mutable struct ChatService <: Toolips.AbstractExtension
@@ -20,6 +28,89 @@ mutable struct ChatService <: Toolips.AbstractExtension
 end
 
 chat = ChatService()
+
+function chat_builder(c::Connection)
+    main_dialog = div("new-chat", align = "center")
+    style!(main_dialog, "width" => 10percent, "left" => 40percent, "top" => 20percent, "height" => 25percent, 
+    "background-color" => "#333333", "padding" => 15px, "z-index" => 4, "position" => "absolute")
+    name_header = h2("make-header", text = "name for new chat")
+    style!(name_header, "color" => "white", "font-size" => 22pt)
+    make_chat = textdiv("makerchat")
+    style!(make_chat, "display" => "inline-block", "background-color" => "white", "color" => "#333333", 
+    "width" => 85percent)
+    subm = button("submit-new", text = "submit")
+    style!(subm, "background-color" => "black", "color" => "white", "width" => 85percent)
+    on(c, subm, "click") do cm::ComponentModifier
+        cname = cm[make_chat]["text"]
+        chat = create_chat!(c, cname)
+        append!(cm, "chat-content", build_chat(c, cm, cname))
+        remove!(cm, "new-chat")
+        open_rpc!(c, cm)
+        script!(c, cm) do cm::ComponentModifier
+            append!(cm, "chat-messages", build_message(chat, "room opened!"))
+            rpc!(c, cm)
+        end
+    end
+    push!(main_dialog, name_header, make_chat, subm)
+    main_dialog::Component{:div}
+end
+
+function build_message(chat::Chat, message::String)
+    n = length(chat.messages) + 1
+    mainmessage = div("chat$n")
+    firstsep = a("firstsep", text = "[")
+    secondsep = a("secondsep", text = "]: ")
+    nmindc = a("nameindicator", text = chat.name)
+    style!(nmindc, "color" => "#333333")
+    msg = a("msg", text = message)
+    push!(mainmessage, firstsep, nmindc, secondsep, msg)
+    mainmessage::Component{:div}
+end
+
+function build_message(c::Connection, active::Chat, message::String)
+    n = length(active.messages) + 1
+    mainmessage = div("chat$n")
+    client = chat.usernames[get_ip(c)]
+    firstsep = a("firstsep", text = "[")
+    secondsep = a("secondsep", text = "]: ")
+    nmindc = a("nameindicator", text = client[1])
+    style!(nmindc, "color" => client[2])
+    msg = a("msg", text = message)
+    push!(mainmessage, firstsep, nmindc, secondsep, msg)
+    push!(active.messages, client[1] => message)
+    mainmessage::Component{:div}
+end
+
+function create_chat!(c::Connection, name::String)
+    newchat = Chat(c, name)
+    push!(newchat.members, chat.usernames[get_ip(c)][1])
+    push!(chat.chats, newchat)
+    newchat::Chat
+end
+
+function build_chat(c::Connection, cm::ComponentModifier, name::String)
+    chat_div = div("chatmain")
+    style!(chat_div, "display" => "inline-block", "margin-left" => 1per, "width" => 99per)
+    messagesbox = div("chat-messages")
+    newmessage = textdiv("chat-new", text = "Shift + Enter to send your message")
+    ToolipsSession.bind(c, cm, newmessage, "Enter", :shift) do cm::ComponentModifier
+        person = chat.usernames[get_ip(c)][1]
+        activ = findfirst(c -> person in c.members, chat.chats)
+        newmsg = build_message(c, chat.chats[activ], cm[newmessage]["text"])
+        append!(cm, messagesbox, newmsg)
+        rpc!(c, cm)
+        set_text!(cm, newmessage, "")
+    end
+    on(newmessage, "focus") do cl::ClientModifier
+        set_text!(cl, newmessage, "")
+    end
+    boxcommon = ("width" => 100percent, "background-color" => "white", "border" => "2px solid #333333", 
+    "border-radius" => 3px, "padding" => 3px)
+    style!(newmessage, "height" => 3percent, "margin-top" => 9px, boxcommon ...)
+    style!(messagesbox, "height" => 80percent, boxcommon ...)
+    push!(chat_div, messagesbox, newmessage)
+    chat_div::Component{:div}
+end
 
 function jlchat_header()
     headbox = div("mainheader", align = "center")
@@ -40,25 +131,22 @@ end
 
 function build_main(c::Connection, cm::ComponentModifier)
     chatnav = div("chatnav")
-    style!(chatnav, "display" => "inline-block", "width" => 20percent)
+    style!(chatnav, "position" => "absolute", "width" => 10percent)
     active_box = div("active-chats")
     style!(active_box, "width" => 100percent)
     inactive_box = div("inactive-chats")
     style!(inactive_box, "width" => 100percent)
     create_chat = button("create-chat", text = "create chat")
+    on(c, create_chat, "click") do cm::ComponentModifier
+        append!(cm, "jlchatbod", chat_builder(c))
+        focus!(cm, "makerchat")
+    end
     style!(create_chat, "color" => "white", "background-color" => "#AA336A", "width" => 100percent, 
     "padding" => 5px, "font-size" => 16pt, "font-weight" => "bold")
     push!(chatnav, create_chat, active_box, inactive_box)
     name::String = chat.usernames[get_ip(c)][1]
     for (e, active_chat) in enumerate(chat.chats)
-        comp = div("chat$(e)")
-        style!(comp, "cursor" => "pointer")
-        cname = a("chname$(e)", text = active_chat.name)
-        chost = a("chost$(e)", text = "")
-        cnt = a("count$(e)", text = length(active_chat.members))
-        style!(cname, "margin-right" => 5px)
-        style!(chost, "margin-right" => 10px)
-        push!(comp, cname, chost, cnt)
+        chtmen = build_chatmenu(e, active_chat)
         if name in active_chat.members
             push!(active_box, comp)
             continue
@@ -67,10 +155,28 @@ function build_main(c::Connection, cm::ComponentModifier)
     end
     main = div("jlchat-main")
     content = div("chat-content")
-    style!(content, "background-color" => "#2e111a")
-    style!(content, "display" => "inline-block")
+    style!(content, "display" => "inline-block", "margin-left" => 10percent, 
+    "width" => 80per)
     push!(main, chatnav, content)
     main::Component{:div}
+end
+
+function build_chatmenu(e::Int64, active_chat::Chat)
+    comp = div("chat$(e)")
+    style!(comp, "cursor" => "pointer")
+    on(c, comp, "click") do cm::ComponentModifier
+        name = chat.usernames[get_ip(c)]
+        if ~(name[1] in active_chat.members)
+            join_rpc!(c, cm, active_chat.host)
+            cht = build_chat(c, cm, active_chat.name)
+        end
+    end
+    cname = a("chname$(e)", text = active_chat.name)
+    chost = a("chost$(e)", text = "")
+    cnt = a("count$(e)", text = length(active_chat.members))
+    style!(cname, "margin-right" => 5px)
+    style!(chost, "margin-right" => 10px)
+    push!(comp, cname, chost, cnt)
 end
 
 function login!(c::Connection, cm::ComponentModifier)
@@ -163,6 +269,9 @@ main = route("/") do c::Connection
         splash_screen(c)
         return
     end
+    write!(c, "you are already here?")
+    @info get_ip(c)
+    @info chat.usernames
 end
 
 export main
