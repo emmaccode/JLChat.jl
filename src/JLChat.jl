@@ -2,16 +2,17 @@ module JLChat
 using Toolips
 using Toolips.Components
 using ToolipsSession
+import Toolips: AbstractConnection
 # extensions
 logger = Toolips.Logger()
-session = Session(["/"])
+session = Session(["/"], timeout = 1)
 
 mutable struct Chat <: Components.Servable
     name::String
     host::String
     members::Vector{String}
     messages::Vector{Pair{String, String}}
-    Chat(c::Connection, name::String) = begin
+    Chat(c::AbstractConnection, name::String) = begin
         ip = get_ip(c)
         members = [ip]
         new(name, ip, members, Vector{Pair{String, String}}())
@@ -29,7 +30,7 @@ end
 
 chat = ChatService()
 
-function chat_builder(c::Connection)
+function chat_builder(c::AbstractConnection)
     main_dialog = div("new-chat", align = "center")
     style!(main_dialog, "width" => 10percent, "left" => 40percent, "top" => 20percent, "height" => 25percent, 
     "background-color" => "#333333", "padding" => 15px, "z-index" => 4, "position" => "absolute")
@@ -67,7 +68,7 @@ function build_message(chat::Chat, message::String)
     mainmessage::Component{:div}
 end
 
-function build_message(c::Connection, active::Chat, message::String)
+function build_message(c::AbstractConnection, active::Chat, message::String)
     n = length(active.messages) + 1
     mainmessage = div("chat$n")
     client = chat.usernames[get_ip(c)]
@@ -81,14 +82,14 @@ function build_message(c::Connection, active::Chat, message::String)
     mainmessage::Component{:div}
 end
 
-function create_chat!(c::Connection, name::String)
+function create_chat!(c::AbstractConnection, name::String)
     newchat = Chat(c, name)
     push!(newchat.members, chat.usernames[get_ip(c)][1])
     push!(chat.chats, newchat)
     newchat::Chat
 end
 
-function build_chat(c::Connection, cm::ComponentModifier, name::String)
+function build_chat(c::AbstractConnection, cm::ComponentModifier, name::String)
     chat_div = div("chatmain")
     style!(chat_div, "display" => "inline-block", "margin-left" => 1per, "width" => 99per)
     messagesbox = div("chat-messages")
@@ -101,7 +102,7 @@ function build_chat(c::Connection, cm::ComponentModifier, name::String)
         rpc!(c, cm)
         set_text!(cm, newmessage, "")
     end
-    on(newmessage, "focus") do cl::ClientModifier
+    on(newmessage, "focusenter") do cl::ClientModifier
         set_text!(cl, newmessage, "")
     end
     boxcommon = ("width" => 100percent, "background-color" => "white", "border" => "2px solid #333333", 
@@ -129,7 +130,7 @@ function jlchat_header()
     headbox::Component{:div}
 end
 
-function build_main(c::Connection, cm::ComponentModifier)
+function build_main(c::AbstractConnection, cm::ComponentModifier)
     chatnav = div("chatnav")
     style!(chatnav, "position" => "absolute", "width" => 10percent)
     active_box = div("active-chats")
@@ -146,12 +147,12 @@ function build_main(c::Connection, cm::ComponentModifier)
     push!(chatnav, create_chat, active_box, inactive_box)
     name::String = chat.usernames[get_ip(c)][1]
     for (e, active_chat) in enumerate(chat.chats)
-        chtmen = build_chatmenu(e, active_chat)
+        chtmen = build_chatmenu(c, e, active_chat)
         if name in active_chat.members
-            push!(active_box, comp)
+            push!(active_box, chtmen)
             continue
         end
-        push!(inactive_box, comp)
+        push!(inactive_box, chtmen)
     end
     main = div("jlchat-main")
     content = div("chat-content")
@@ -161,14 +162,15 @@ function build_main(c::Connection, cm::ComponentModifier)
     main::Component{:div}
 end
 
-function build_chatmenu(e::Int64, active_chat::Chat)
+function build_chatmenu(c::Connection, e::Int64, active_chat::Chat)
     comp = div("chat$(e)")
-    style!(comp, "cursor" => "pointer")
+    style!(comp, "background-color" => "white", "padding" => 6px, "cursor" => "pointer")
     on(c, comp, "click") do cm::ComponentModifier
         name = chat.usernames[get_ip(c)]
         if ~(name[1] in active_chat.members)
             join_rpc!(c, cm, active_chat.host)
-            cht = build_chat(c, cm, active_chat.name)
+            append!(cm, "chat-content", build_chat(c, cm, active_chat.name))
+            push!(active_chat.members, chat.usernames[get_ip(c)][1])
         end
     end
     cname = a("chname$(e)", text = active_chat.name)
@@ -177,9 +179,10 @@ function build_chatmenu(e::Int64, active_chat::Chat)
     style!(cname, "margin-right" => 5px)
     style!(chost, "margin-right" => 10px)
     push!(comp, cname, chost, cnt)
+    comp::Component{:div}
 end
 
-function login!(c::Connection, cm::ComponentModifier)
+function login!(c::AbstractConnection, cm::ComponentModifier)
     name = cm["logname"]["text"]
     color = cm["logcolor"]["value"]
     if name == ""
@@ -217,7 +220,7 @@ function login!(c::Connection, cm::ComponentModifier)
     end
 end
 
-function splash_screen(c::Connection)
+function splash_screen(c::AbstractConnection)
     mainbod = body("jlchatbod")
     style!(mainbod, "transtion" => 2s)
     splash_content = div("splash-content", align = "center")
@@ -264,14 +267,21 @@ function splash_screen(c::Connection)
     end
 end
 
-main = route("/") do c::Connection
+main = route("/") do c::AbstractConnection
     if ~(get_ip(c) in keys(chat.usernames))
         splash_screen(c)
         return
     end
-    write!(c, "you are already here?")
-    @info get_ip(c)
-    @info chat.usernames
+    mainbod = body("jlchatbod")
+    style!(mainbod, "transtion" => 2s, "background-color" => "#FFB3B2")
+    write!(c, mainbod)
+    on(c, "load") do cm::ComponentModifier
+        append!(cm, "jlchatbod", build_main(c, cm))
+        active_chat = findfirst(cht::Chat -> get_ip(c) in cht.members, chat.chats)
+        if ~(isnothing(active_chat))
+            append!(cm, "chat-content", build_chat(c, cm, chat.chats[active_chat].name))
+        end
+    end
 end
 
 export main
